@@ -37,6 +37,11 @@ jobs:
             CROSS_COMPILE=aarch64-buildroot-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             olddefconfig
+          make -j$(nproc --all) CC=clang O=out ARCH=arm64 \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-buildroot-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            prepare scripts
 
 
       - name: 5. Build dfroot.ko
