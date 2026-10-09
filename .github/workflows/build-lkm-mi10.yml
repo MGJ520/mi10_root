@@ -36,7 +36,8 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-buildroot-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-            modules_prepare
+            olddefconfig
+
 
       - name: 5. Build dfroot.ko
         run: |
