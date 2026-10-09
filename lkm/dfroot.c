@@ -1,7 +1,6 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/kmod.h>
-#include <linux/kprobes.h>
 #include <linux/module.h>
 #include <linux/namei.h>
 #include <linux/ptrace.h>
@@ -17,19 +16,6 @@ typedef int  (*kern_path_t)(const char *, unsigned int, struct path *);
 typedef int  (*invalidate_t)(struct address_space *);
 typedef void (*path_put_t)(const struct path *);
 
-static struct kprobe defex_enforce_kp;
-static struct kprobe defex_umh_kp;
-static int defex_enforce_ok;
-static int defex_umh_ok;
-
-static int null_pre_handler(struct kprobe *p, struct pt_regs *regs)
-{
-    (void)p;
-    regs->regs[0] = 0;         /* x0 = DEFEX_ALLOW */
-    regs->pc = regs->regs[30]; /* skip body: return to caller */
-    return 1;
-}
-
 static int __nocfi __init dfroot_init(void)
 {
     kallsyms_lookup_name_t get_addr;
@@ -40,7 +26,6 @@ static int __nocfi __init dfroot_init(void)
     umh_setup_t umh_setup;
     umh_exec_t  umh_exec;
     bool *selinux_state;
-    struct kprobe kln_kp;
     void *info;
     int ret;
 
@@ -54,14 +39,12 @@ static int __nocfi __init dfroot_init(void)
         " rmmod oplus_security_guard 2>/dev/null",        //
         NULL };
 
-    // Symbol finder
-    kln_kp = (struct kprobe){ .symbol_name = "kallsyms_lookup_name" };
-    if (register_kprobe(&kln_kp) < 0) {
-        pr_err("dfroot: kallsyms_lookup_name not found\n");
+    // Symbol finder — kallsyms_lookup_name is directly exported in 4.19
+    get_addr = (kallsyms_lookup_name_t)kallsyms_lookup_name;
+    if (!get_addr) {
+        pr_err("dfroot: kallsyms_lookup_name not available\n");
         return -EINVAL;
     }
-    get_addr = (kallsyms_lookup_name_t)kln_kp.addr;
-    unregister_kprobe(&kln_kp);
 
     // Invalidate page_cache for crash_dump64
     // NOTE: this can cause issues if a process is currently executing
@@ -91,23 +74,6 @@ static int __nocfi __init dfroot_init(void)
     WRITE_ONCE(*selinux_state, false);
     pr_info("dfroot: selinux_state permissive\n");
 
-    // Samsung
-    defex_enforce_kp = (struct kprobe){ .addr = (kprobe_opcode_t *)get_addr("task_defex_enforce"),
-                                .pre_handler = null_pre_handler };
-    defex_enforce_ok = register_kprobe(&defex_enforce_kp) == 0;
-    if (!defex_enforce_ok)
-        pr_err("dfroot: task_defex_enforce not in this kernel, skipping\n");
-    else
-        pr_info("dfroot: task_defex_enforce hooked\n");
-    
-    defex_umh_kp = (struct kprobe){ .addr = (kprobe_opcode_t *)get_addr("task_defex_user_exec"),
-                              .pre_handler = null_pre_handler };
-    defex_umh_ok = register_kprobe(&defex_umh_kp) == 0;
-    if (!defex_umh_ok)
-        pr_err("dfroot: task_defex_user_exec not in this kernel, skipping\n");
-    else
-        pr_info("dfroot: task_defex_user_exec hooked\n");
-
     // Run UMH command
     umh_setup = (umh_setup_t)get_addr("call_usermodehelper_setup");
     umh_exec  = (umh_exec_t)get_addr("call_usermodehelper_exec");
@@ -133,8 +99,6 @@ static int __nocfi __init dfroot_init(void)
 
 static void __exit dfroot_exit(void)
 {
-    if (defex_enforce_ok) unregister_kprobe(&defex_enforce_kp);
-    if (defex_umh_ok)     unregister_kprobe(&defex_umh_kp);
 }
 
 module_init(dfroot_init);

@@ -31,26 +31,14 @@ jobs:
           sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 113/' Makefile
           DEFCONF=$(find arch -name "umi_defconfig" | head -1)
           echo "Using defconfig: $DEFCONF"
-          sed -i '/^# CONFIG_KPROBES is not set/d' "$DEFCONF"
-          sed -i '/^# CONFIG_KALLSYMS is not set/d' "$DEFCONF"
-          printf 'CONFIG_KPROBES=y\nCONFIG_KALLSYMS=y\nCONFIG_KALLSYMS_ALL=y\nCONFIG_MODULE_UNLOAD=y\n' >> "$DEFCONF"
           make -j$(nproc --all) $COMMON vendor/umi_defconfig
           sed -i 's/CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf-g655218745b37"/' .config
           sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' .config
           sed -i 's/# CONFIG_MODULES is not set/CONFIG_MODULES=y/' .config
-          grep -E "CONFIG_MODULES|CONFIG_HAVE_KPROBES|CONFIG_KPROBES|CONFIG_KALLSYMS" .config || true
+          grep -E "CONFIG_MODULES|CONFIG_KALLSYMS" .config || true
           make -j$(nproc --all) $COMMON olddefconfig
-          if ! grep -q "^CONFIG_KPROBES=y" .config; then
-            echo "KPROBES reverted by olddefconfig - trying direct .config write"
-            sed -i '/^# CONFIG_KPROBES is not set/d; s/^CONFIG_KPROBES=.*/CONFIG_KPROBES=y/' .config
-            echo 'CONFIG_KPROBES=y' >> .config
-            sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' .config
-            make -j$(nproc --all) $COMMON prepare scripts 2>&1 || true
-          else
-            make -j$(nproc --all) $COMMON prepare scripts
-          fi
-          echo "=== KPROBES config (final) ==="
-          grep -E "^CONFIG_KPROBES|^# CONFIG_KPROBES" .config || true
+          make -j$(nproc --all) $COMMON prepare scripts
+          echo "=== kernel.release ==="
           cat include/config/kernel.release
 
       - name: 5. Build dfroot.ko
@@ -72,7 +60,7 @@ jobs:
           fi
           ls -la $LKM/dfroot.ko
           echo "=== dfroot.ko symbols ==="
-          llvm-nm $LKM/dfroot.ko | grep -E "register_kprobe|__this_module|selinux|kallsyms" || true
+          llvm-nm $LKM/dfroot.ko | grep -E "kallsyms|__this_module|selinux|init_module" || true
           ls -la $LKM/dfroot.o
 
       - name: 6. Strip dfroot.ko
