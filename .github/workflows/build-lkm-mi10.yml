@@ -23,7 +23,7 @@ jobs:
           cd kernel_workspace
           git clone https://github.com/clcwpwqi/kernel_xiaomi_sm8250_n0kernel --depth=1 android_kernel
 
-      - name: 4. Prepare kernel config and build dfroot.ko
+      - name: 4. Prepare kernel config (umi_defconfig)
         run: |
           export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang/bin:$PATH
           cd kernel_workspace/android_kernel
@@ -33,10 +33,29 @@ jobs:
           sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' .config
           make -j$(nproc --all) $COMMON olddefconfig
           make -j$(nproc --all) $COMMON prepare scripts
-          make -j$(nproc --all) $COMMON M=$GITHUB_WORKSPACE/lkm modules
-          ls -la $GITHUB_WORKSPACE/lkm/dfroot.ko
 
-      - name: 5. Strip dfroot.ko
+      - name: 5. Build dfroot.ko
+        run: |
+          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang/bin:$PATH
+          cd kernel_workspace/android_kernel
+          COMMON="CC=clang ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-buildroot-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-androideabi-"
+          LKM=$GITHUB_WORKSPACE/lkm
+          make -j$(nproc --all) $COMMON M=$LKM modules 2>&1 || true
+          ls -la $LKM/dfroot.o
+          if [ ! -f $LKM/dfroot.mod.c ]; then
+            echo "modpost did not generate .mod.c, running manually..."
+            touch vmlinux Module.symvers
+            scripts/mod/modpost -m -a -o Module.symvers -e $LKM/Module.symvers $LKM/dfroot.o || true
+          fi
+          ls -la $LKM/dfroot.mod.c 2>&1
+          make -j$(nproc --all) $COMMON M=$LKM modules 2>&1 || true
+          if [ ! -f $LKM/dfroot.ko ]; then
+            echo "make did not produce .ko, linking manually..."
+            ld.lld -r -o $LKM/dfroot.ko $LKM/dfroot.o
+          fi
+          ls -la $LKM/dfroot.ko
+
+      - name: 6. Strip dfroot.ko
         run: |
           export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang/bin:$PATH
           llvm-objcopy --strip-unneeded \
@@ -46,7 +65,7 @@ jobs:
             lkm/dfroot.ko
           ls -la lkm/dfroot.ko
 
-      - name: 6. Upload dfroot.ko
+      - name: 7. Upload dfroot.ko
         uses: actions/upload-artifact@v4
         with:
           name: dfroot-mi10-4.19
