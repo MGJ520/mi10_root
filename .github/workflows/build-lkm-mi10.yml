@@ -1,0 +1,67 @@
+name: Build dfroot.ko for Mi10 (4.19)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-lkm:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 1. Checkout DirtyFrag (for lkm/dfroot.c)
+        uses: actions/checkout@v4
+
+      - name: 2. Download Clang toolchain
+        run: |
+          mkdir -p kernel_workspace
+          cd kernel_workspace
+          wget -q https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240125-release/Clang-19.0.0git-20240125.tar.gz
+          mkdir -p clang
+          tar -xzf Clang-19.0.0git-20240125.tar.gz -C clang
+
+      - name: 3. Clone Mi10 kernel source (n0kernel 4.19)
+        run: |
+          cd kernel_workspace
+          git clone https://github.com/clcwpwqi/kernel_xiaomi_sm8250_n0kernel --depth=1 android_kernel
+
+      - name: 4. Prepare kernel config (umi_defconfig)
+        run: |
+          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang/bin:$PATH
+          cd kernel_workspace/android_kernel
+          make -j$(nproc --all) CC=clang O=out ARCH=arm64 \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-buildroot-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            vendor/umi_defconfig
+          make -j$(nproc --all) CC=clang O=out ARCH=arm64 \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-buildroot-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            modules_prepare
+
+      - name: 5. Build dfroot.ko
+        run: |
+          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang/bin:$PATH
+          cd kernel_workspace/android_kernel
+          make -j$(nproc --all) CC=clang O=out ARCH=arm64 \
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-buildroot-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            M=$GITHUB_WORKSPACE/lkm \
+            modules
+          ls -la $GITHUB_WORKSPACE/lkm/dfroot.ko
+
+      - name: 6. Strip dfroot.ko
+        run: |
+          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang/bin:$PATH
+          llvm-objcopy --strip-unneeded \
+            -R .comment -R .note.gnu.build-id -R .note.gnu.property \
+            -R .note.Linux -R .note.GNU-stack \
+            -R .BTF -R .BTF.base -R .llvm_addrsig \
+            lkm/dfroot.ko
+          ls -la lkm/dfroot.ko
+
+      - name: 7. Upload dfroot.ko
+        uses: actions/upload-artifact@v4
+        with:
+          name: dfroot-mi10-4.19
+          path: lkm/dfroot.ko
