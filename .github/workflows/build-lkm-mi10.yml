@@ -23,16 +23,18 @@ jobs:
           cd kernel_workspace
           git clone https://github.com/clcwpwqi/kernel_xiaomi_sm8250_n0kernel --depth=1 android_kernel
 
-      - name: 4. Prepare kernel config (umi_defconfig)
+      - name: 4. Prepare kernel config (match Mi10 vermagic)
         run: |
           export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang/bin:$PATH
           cd kernel_workspace/android_kernel
           COMMON="CC=clang ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-buildroot-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-androideabi-"
+          sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 113/' Makefile
           make -j$(nproc --all) $COMMON vendor/umi_defconfig
-          make -j$(nproc --all) $COMMON olddefconfig
+          sed -i 's/CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf-g655218745b37"/' .config
           sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' .config
           make -j$(nproc --all) $COMMON olddefconfig
           make -j$(nproc --all) $COMMON prepare scripts
+          cat include/config/kernel.release
 
       - name: 5. Build dfroot.ko
         run: |
@@ -43,15 +45,29 @@ jobs:
           make -j$(nproc --all) $COMMON M=$LKM modules 2>&1 || true
           ls -la $LKM/dfroot.o
           if [ ! -f $LKM/dfroot.mod.c ]; then
-            echo "modpost did not generate .mod.c, running manually..."
-            touch vmlinux Module.symvers
-            scripts/mod/modpost -m -a -o Module.symvers -e $LKM/Module.symvers $LKM/dfroot.o || true
+            echo "Generating dfroot.mod.c manually..."
+            cat > $LKM/dfroot.mod.c << 'MODCEOF'
+#include <linux/module.h>
+#include <linux/vermagic.h>
+#include <linux/compiler.h>
+MODULE_INFO(vermagic, VERMAGIC_STRING);
+MODULE_INFO(name, KBUILD_MODNAME);
+__visible struct module __this_module
+__attribute__((section(".gnu.linkonce.this_module"))) = {
+    .name = KBUILD_MODNAME,
+    .init = init_module,
+#ifdef CONFIG_MODULE_UNLOAD
+    .exit = cleanup_module,
+#endif
+    .arch = MODULE_ARCH_INIT,
+};
+MODCEOF
           fi
-          ls -la $LKM/dfroot.mod.c 2>&1
+          ls -la $LKM/dfroot.mod.c
           make -j$(nproc --all) $COMMON M=$LKM modules 2>&1 || true
           if [ ! -f $LKM/dfroot.ko ]; then
-            echo "make did not produce .ko, linking manually..."
-            ld.lld -r -o $LKM/dfroot.ko $LKM/dfroot.o
+            echo "Linking manually..."
+            ld.lld -r -o $LKM/dfroot.ko $LKM/dfroot.o $LKM/dfroot.mod.o
           fi
           ls -la $LKM/dfroot.ko
 
