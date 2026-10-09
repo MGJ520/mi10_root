@@ -29,15 +29,17 @@ jobs:
           cd kernel_workspace/android_kernel
           COMMON="CC=clang ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-buildroot-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-androideabi-"
           sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 113/' Makefile
+          # Force-enable kprobes in defconfig (dfroot.c relies on register_kprobe)
+          printf 'CONFIG_KPROBES=y\nCONFIG_KALLSYMS=y\nCONFIG_KALLSYMS_ALL=y\nCONFIG_KPROBE_EVENTS=y\nCONFIG_MODULE_UNLOAD=y\n' >> arch/arm64/configs/vendor/umi_defconfig
           make -j$(nproc --all) $COMMON vendor/umi_defconfig
           sed -i 's/CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf-g655218745b37"/' .config
           sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' .config
           sed -i 's/# CONFIG_MODULES is not set/CONFIG_MODULES=y/' .config
-          sed -i 's/# CONFIG_KPROBES is not set/CONFIG_KPROBES=y/' .config
-          sed -i 's/# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y/' .config
-          sed -i 's/CONFIG_KALLSYMS=.*/CONFIG_KALLSYMS=y/' .config
           make -j$(nproc --all) $COMMON olddefconfig
           make -j$(nproc --all) $COMMON prepare scripts
+          # Verify kprobes is enabled
+          echo "=== KPROBES config ==="
+          grep -E "^CONFIG_KPROBES|^# CONFIG_KPROBES" .config || true
           cat include/config/kernel.release
 
       - name: 5. Build dfroot.ko
@@ -59,6 +61,9 @@ jobs:
             ld.lld -r -o $LKM/dfroot.ko $LKM/dfroot.o $LKM/dfroot.mod.o
           fi
           ls -la $LKM/dfroot.ko
+          # Verify code is complete (init_module should reference register_kprobe)
+          echo "=== dfroot.ko symbols ==="
+          llvm-nm $LKM/dfroot.ko | grep -E "register_kprobe|__this_module|selinux|kallsyms" || true
 
       - name: 6. Strip dfroot.ko
         run: |
